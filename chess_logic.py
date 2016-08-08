@@ -22,7 +22,7 @@ class Board:
         self.all_moves = []
         self.all_opponent_attacks = []
         self.invalid_moves = []
-        self.game_condition = 'game in progress'
+        self.game_condition = 'match_in_progress'
 
         self.game_history = GameHistory()
         self.previous_move = False
