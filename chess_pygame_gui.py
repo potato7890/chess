@@ -1,6 +1,7 @@
 import pygame
 import os
 from chess_logic import *
+import time
 
 os.environ['SDL_VIDEO_CENTERED'] = '1'
 
@@ -145,7 +146,7 @@ class ChessGame(Window):
                 elif clicked_piece[1] == 'n':
                     for square in self.abstract_board.find_knight_moves(selectable_color, clicked_square):
                         results.append((self.clicked_square, square))
-                pre_final_results = [result for result in results if result not in self.abstract_board.invalid_moves]
+                pre_final_results = [result for result in results if result in self.abstract_board.valid_moves]
                 for result in pre_final_results:
                     final_results.append(result[1])
             else:
@@ -169,7 +170,7 @@ class ChessGame(Window):
                 elif clicked_piece[1] == 'n':
                     for square in self.abstract_board.find_knight_moves(selectable_color, clicked_square_inverted):
                         results.append((clicked_square_inverted, square))
-                pre_final_results = [result for result in results if result not in self.abstract_board.invalid_moves]
+                pre_final_results = [result for result in results if result in self.abstract_board.valid_moves]
                 for result in pre_final_results:
                     final_results.append((7 - result[1][0], 7 - result[1][1]))
                 self.abstract_board.flip_board()
@@ -285,6 +286,22 @@ class ChessGame(Window):
             self.draw_clean_board()
             self.draw_pieces()
 
+    def computer_make_move(self):
+        flip = False
+        if self.abstract_board.current_white != self.abstract_board.current_white_turn:
+            self.abstract_board.flip_board()
+            flip = True
+        move = self.abstract_board.find_best_move()
+        if move:
+            self.abstract_board.move_piece(move)
+        else:
+            print('no moves available')
+        print('turn: ' + str(self.abstract_board.turn))
+        if flip:
+            self.abstract_board.flip_board()
+        self.draw_clean_board()
+        self.draw_pieces()
+
     def game_loop(self):
         while True:
             self.clock.tick(60)
@@ -295,6 +312,12 @@ class ChessGame(Window):
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         quit()
+                    elif event.key == pygame.K_c:
+                        start = time.perf_counter()
+                        for _ in range(1):
+                            self.computer_make_move()
+                        end = time.perf_counter()
+                        print(end-start)
                     elif event.key == pygame.K_LEFT:
                         self.take_back()
                     elif event.key == pygame.K_RIGHT:
