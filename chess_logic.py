@@ -1,6 +1,3 @@
-import copy
-
-
 class Board:
     def __init__(self):
         self.turn = 0
@@ -68,14 +65,13 @@ class Board:
 
         self.previous_move = False
 
-        self.update_all_moves()  # important
+        self.all_moves = self.find_all_moves()
+        self.valid_moves = [move for move in self.all_moves if move not in self.invalid_moves]  # important
+
         self.store_to_history()
 
     def flip_board(self):
-        _flip_board = {}
-        for square in self.game_board:
-            _flip_board[(7 - square[0], 7 - square[1])] = self.game_board[square]
-        self.game_board = _flip_board
+        self.game_board = {(7 - square[0], 7 - square[1]): self.game_board[square] for square in self.game_board}
         self.current_white = not self.current_white
 
     def move_piece(self, path, advance_turn=True, calculation=False):
@@ -121,38 +117,37 @@ class Board:
         if len(path) == 3:
             self.game_board[path[1]] = path[2]
         if advance_turn:
-            self.advance_turn(calculation)
+            self.current_white_turn = not self.current_white_turn
+            self.turn += 1
+            if self.current_white == self.current_white_turn:
+                self.advance_turn(calculation)
+            else:
+                self.flip_board()
+                self.advance_turn(calculation)
+                self.flip_board()
             self.previous_move = path
 
     def advance_turn(self, calculation):
         # updates flags, precise order required:
         # store_to_history before determine_game_state, update_all_moves after determine_game_state
-        self.current_white_turn = not self.current_white_turn
-        self.turn += 1
-        if self.current_white == self.current_white_turn:
-            self.get_opponent_attacked_squares()
-            self.find_invalid_moves()
-            self.update_castle_rights()
-            self.store_to_history(calculation=calculation)
-            self.determine_game_state(calculation=calculation)
+        self.get_opponent_attacked_squares()
+        self.find_invalid_moves()
+        self.update_castle_rights()
+        self.store_to_history(calculation=calculation)
+        self.determine_game_state()
+        if not calculation:
             self.game_history.main_branch[-1].game_state = self.game_state
             self.update_all_moves()
             self.game_history.main_branch[-1].all_moves = self.all_moves
             self.game_history.main_branch[-1].valid_moves = self.valid_moves
         else:
-            self.flip_board()
-            self.get_opponent_attacked_squares()
-            self.find_invalid_moves()
-            self.update_castle_rights()
-            self.store_to_history(calculation=calculation)
-            self.determine_game_state(calculation=calculation)
-            self.game_history.main_branch[-1].game_state = self.game_state
+            self.game_history.calculation_branch[-1].game_state = self.game_state
             self.update_all_moves()
-            self.game_history.main_branch[-1].all_moves = self.all_moves
-            self.game_history.main_branch[-1].valid_moves = self.valid_moves
-            self.flip_board()
+            self.game_history.calculation_branch[-1].all_moves = self.all_moves
+            self.game_history.calculation_branch[-1].valid_moves = self.valid_moves
 
     def store_to_history(self, calculation=False):
+        # stores to history
         entry = Entry(self.turn, self.game_board, self.current_white_turn, self.fifty_moves,
                       self.en_passant_lane_for_opponent,
                       self.white_king_side_castle_right, self.white_queen_side_castle_right,
@@ -166,6 +161,7 @@ class Board:
             self.game_history.calculation_branch.append(entry)
 
     def load_from_history(self, turn=-1, calculation=False):
+        # loads from history
         if not calculation:
             self.turn = turn
             entry = self.game_history.main_branch[turn]
@@ -197,13 +193,6 @@ class Board:
         # sets current perspective flag to game_board perspective
         elif self.current_white != entry.current_white_turn and calculation:
             self.current_white = entry.current_white_turn
-
-    @staticmethod
-    def check_boundary(square):
-        if -1 < square[0] < 8 and -1 < square[1] < 8:
-            return True
-        else:
-            return False
 
     @staticmethod
     def move_north(position, distance):
@@ -239,21 +228,18 @@ class Board:
 
     def find_pawn_moves(self, color, position, omit_pawn_forward=False):
         results = []
-        capture_squares = [(position[0] - 1, position[1] - 1), (position[0] + 1, position[1] - 1)]
         move_squares = [(position[0], position[1] - 1)]
         if position[1] == 6 and not omit_pawn_forward:
             move_squares.append((position[0], position[1] - 2))
         if omit_pawn_forward:
             move_squares = []
-        for square in capture_squares:
-            if self.check_boundary(square) and self.game_board[square][0] != color \
+        for square in [(position[0] - 1, position[1] - 1), (position[0] + 1, position[1] - 1)]:
+            if -1 < square[0] < 8 and -1 < square[1] < 8 and self.game_board[square][0] != color \
                     and self.game_board[square] != ' ':
                 results.append(square)
-        if self.check_boundary(move_squares[0]) and self.game_board[move_squares[0]] == ' ':
-            results.append(move_squares[0])
-            if len(move_squares) == 2:
-                if self.check_boundary(move_squares[1]) and self.game_board[move_squares[1]] == ' ':
-                    results.append(move_squares[1])
+        for square in move_squares:
+            if -1 < square[0] < 8 and -1 < square[1] < 8 and self.game_board[square] == ' ':
+                results.append(square)
         if abs(self.en_passant_lane_for_opponent - position[0]) == 1 and position[1] == 3:
             results.append((self.en_passant_lane_for_opponent, 2))
         return results
@@ -263,11 +249,9 @@ class Board:
         results = []
         while True:
             square = direction_function(position, distance)
-            if self.check_boundary(square) and self.game_board[square][0] != color:
+            if -1 < square[0] < 8 and -1 < square[1] < 8 and self.game_board[square][0] != color:
                 results.append(square)
-                if self.game_board[square][0] != ' ':
-                    break
-                if distance == maximum_distance:
+                if self.game_board[square][0] != ' ' or distance == maximum_distance:
                     break
                 distance += 1
             else:
@@ -284,29 +268,25 @@ class Board:
 
     def find_knight_moves(self, color, position):
         results = []
-        moves = [(position[0] + 1, position[1] + 2), (position[0] + 2, position[1] + 1),
-                 (position[0] + 1, position[1] - 2), (position[0] + 2, position[1] - 1),
-                 (position[0] - 1, position[1] + 2), (position[0] - 2, position[1] + 1),
-                 (position[0] - 1, position[1] - 2), (position[0] - 2, position[1] - 1)]
-        for move in moves:
-            if self.check_boundary(move):
-                if self.game_board[move][0] != color:
-                    results.append(move)
+        for square in [(position[0] + 1, position[1] + 2), (position[0] + 2, position[1] + 1),
+                       (position[0] + 1, position[1] - 2), (position[0] + 2, position[1] - 1),
+                       (position[0] - 1, position[1] + 2), (position[0] - 2, position[1] + 1),
+                       (position[0] - 1, position[1] - 2), (position[0] - 2, position[1] - 1)]:
+            if -1 < square[0] < 8 and -1 < square[1] < 8 and self.game_board[square][0] != color:
+                results.append(square)
         return results
 
     def find_bishop_moves(self, color, position):
         results = []
-        directions = [self.move_northeast, self.move_northwest, self.move_southeast, self.move_southwest]
-        for direction in directions:
+        for direction in [self.move_northeast, self.move_northwest, self.move_southeast, self.move_southwest]:
             for result in self.directional_search(color, position, direction):
                 results.append(result)
         return results
 
     def find_king_moves(self, color, position, omit_castle=False):
         results = []
-        directions = [self.move_north, self.move_east, self.move_south, self.move_west,
-                      self.move_northeast, self.move_northwest, self.move_southeast, self.move_southwest]
-        for direction in directions:
+        for direction in [self.move_north, self.move_east, self.move_south, self.move_west,
+                          self.move_northeast, self.move_northwest, self.move_southeast, self.move_southwest]:
             for result in self.directional_search(color, position, direction, 1):
                 results.append(result)
         if not omit_castle:
@@ -327,19 +307,14 @@ class Board:
         return results
 
     def find_queen_moves(self, color, position):
-        results = []
-        for result in self.find_bishop_moves(color, position):
-            results.append(result)
-        for result in self.find_rook_moves(color, position):
-            results.append(result)
-        return results
+        return [result for result in self.find_bishop_moves(color, position)] + \
+               [result for result in self.find_rook_moves(color, position)]
 
     def king_is_attacked(self):
         king_position = ()
         for key in self.game_board:
-            if self.game_board[key][0] == self.get_current_turn():
-                if self.game_board[key][1] == 'k':
-                    king_position = key
+            if self.game_board[key][0] == self.get_current_turn() and self.game_board[key][1] == 'k':
+                king_position = key
         if king_position in self.all_opponent_attacks:
             return True
         else:
@@ -364,12 +339,12 @@ class Board:
         for position in self.game_board:
             if self.game_board[position][0] == color:
                 if self.game_board[position][1] == 'p':
-                    for move in self.find_pawn_moves(color, position, omit_pawn_forward=False):
+                    for move in self.find_pawn_moves(color, position, omit_pawn_forward=False):  ###
                         if move[1] == 0:
-                            results.append((position, move, ''.join([self.get_current_turn(), 'q'])))
-                            results.append((position, move, ''.join([self.get_current_turn(), 'n'])))
-                            results.append((position, move, ''.join([self.get_current_turn(), 'r'])))
-                            results.append((position, move, ''.join([self.get_current_turn(), 'b'])))
+                            results.append((position, move, ''.join([color, 'q'])))
+                            results.append((position, move, ''.join([color, 'n'])))
+                            results.append((position, move, ''.join([color, 'r'])))
+                            results.append((position, move, ''.join([color, 'b'])))
                         else:
                             results.append((position, move))
                 elif self.game_board[position][1] == 'r':
@@ -389,7 +364,7 @@ class Board:
                         results.append((position, move))
         return results
 
-    def update_all_moves(self):
+    def update_all_moves(self, evaluate_move=True):
         # creates list of all possible moves minus all invalid moves from board perspective
         if self.game_state in ['check', 'match_in_progress']:
             self.all_moves = self.find_all_moves()
@@ -399,16 +374,13 @@ class Board:
             self.valid_moves = []
 
     def get_opponent_attacked_squares(self):
-        self.all_opponent_attacks = []
-        results = []
         self.flip_board()
-        for path in self.find_all_moves(omit_castle=True):
-            results.append(path[1])
+        self.all_opponent_attacks = [(7 - move[0], 7 - move[1]) for move in
+                                     [path[1] for path in self.find_all_moves(omit_castle=True)]]
         self.flip_board()
-        for move in results:
-            self.all_opponent_attacks.append((7 - move[0], 7 - move[1]))
 
     def update_castle_rights(self):
+        # updates castle rights
         checks = 0
         self.queen_side_castling = False
         self.king_side_castling = False
@@ -453,11 +425,11 @@ class Board:
                 self.queen_side_castling = False
                 self.king_side_castling = False
 
-    def determine_game_state(self, calculation):
+    def determine_game_state(self):
         pieces_on_board = [piece for piece in self.game_board.values() if piece != ' ']
         pieces_on_board_reduced = [piece for piece in [piece[1] for piece in pieces_on_board] if
                                    piece not in ['k', 'b', 'n']]
-        if self.game_history.three_fold_repetition(calculation):
+        if self.game_history.three_fold_repetition():
             self.game_state = 'draw_three_fold_repetition'
         elif self.fifty_moves >= 50:
             self.game_state = 'draw_fifty_moves_rule'
@@ -480,30 +452,35 @@ class Board:
             self.game_state = 'match_in_progress'
 
     def evaluate_position(self):
+        multiplier = 1 if self.current_white else -1
         result = 0
         piece_values = {' ': 0,
                         'wp': 1.4, 'bp': -1.4,
                         'wn': 3.0, 'bn': -3.0,
                         'wb': 3.5, 'bb': -3.5,
                         'wr': 5.0, 'br': -5.0,
-                        'wq': 9.0, 'bq': -9.0,
+                        'wq': 9.5, 'bq': -9.5,
                         'wk': 0, 'bk': 0}
-        for piece in self.game_board.values():
-            result += piece_values[piece]
+        for square in self.game_board:
+            piece_evaluation = piece_values[self.game_board[square]]
+            piece_evaluation *= 1.05 * (7 - (abs(3.5 - square[0]) + abs(3.5 - square[1])))
+            if square in self.all_opponent_attacks:
+                piece_evaluation -= 0.05 * multiplier
+            result += piece_evaluation
         if self.current_white:
-            result += len(self.valid_moves) * 0.01
-            result -= len(self.all_opponent_attacks) * 0.01
+            result += len(self.valid_moves) * 0.02
+            result -= len(self.all_opponent_attacks) * 0.02
         else:
-            result -= len(self.valid_moves) * 0.01
-            result += len(self.all_opponent_attacks) * 0.01
+            result -= len(self.valid_moves) * 0.02
+            result += len(self.all_opponent_attacks) * 0.02
         return result
 
-    def find_best_move(self, maximum_depth=2):
+    def find_best_move(self, maximum_depth=3):
         depth = 0
         if self.current_white_turn != self.current_white:
             self.flip_board()
 
-        def minimax():
+        def minimax(reference):
             nonlocal maximum_depth
             nonlocal depth
             if depth < maximum_depth:
@@ -517,17 +494,22 @@ class Board:
                     else:
                         results.append(-100)
                 else:
+                    # _move_options = self.valid_moves if not self.current_white_turn else self.valid_moves[::-1]
                     for move in self.valid_moves:
                         self.move_piece(move, calculation=True)  # store
                         self.flip_board()
-                        results.append(minimax())
+                        try:
+                            _input_reference = max(results) if self.current_white_turn else min(results)
+                        except ValueError:
+                            _input_reference = float('-inf') if self.current_white_turn else float('inf')
+                        results.append(minimax(_input_reference))
                         del self.game_history.calculation_branch[-1]  # load
                         self.load_from_history(calculation=True)  # load
+                        if (self.current_white_turn and max(results) > reference) or \
+                                (not self.current_white_turn and min(results) < reference):
+                            break
                 depth -= 1
-                if self.current_white_turn:
-                    return max(results)
-                else:
-                    return min(results)
+                return max(results) if self.current_white_turn else min(results)
             else:
                 if self.game_state[:4] == 'draw':
                     return 0
@@ -540,24 +522,33 @@ class Board:
                     return self.evaluate_position()
 
         first_level_results = []
+        ###
         n = len(self.valid_moves)
         m = 0
+        ###
         self.store_to_history(calculation=True)  # store
+        # move_options = self.valid_moves if not self.current_white_turn else self.valid_moves[::-1]
         for first_level_move in self.valid_moves:
+            ###
             m += 1
             print('turn: ' + str(self.turn) + ' considering move: ' + str(m) + ' of ' + str(n))
+            ###
             self.move_piece(first_level_move, calculation=True)  # store
             self.flip_board()
-            first_level_results.append(minimax())
+            try:
+                input_reference = max(first_level_results) if self.current_white_turn else min(first_level_results)
+            except ValueError:
+                input_reference = float('-inf') if self.current_white_turn else float('inf')
+            first_level_results.append(minimax(input_reference))
             del self.game_history.calculation_branch[-1]  # load
             self.load_from_history(calculation=True)  # load
 
-        if len(first_level_results) > 0:
+        try:
             if self.current_white_turn:
                 return self.valid_moves[first_level_results.index(max(first_level_results))]
             else:
                 return self.valid_moves[first_level_results.index(min(first_level_results))]
-        else:
+        except ValueError:
             return 0
 
 
@@ -566,12 +557,9 @@ class GameHistory:
         self.main_branch = []
         self.calculation_branch = []
 
-    def three_fold_repetition(self, calculation):
-        if calculation:
-            branch = self.main_branch + self.calculation_branch
-        else:
-            branch = self.main_branch
-        relevant_list = [(condition.game_board, condition.current_white_turn) for condition in branch]
+    def three_fold_repetition(self):
+        relevant_list = [(condition.game_board, condition.current_white_turn) for condition in
+                         self.main_branch + self.calculation_branch]
         for condition in relevant_list:
             if relevant_list.count(condition) >= 3:
                 return True
@@ -599,3 +587,10 @@ class Entry:
         self.valid_moves = list(valid_moves)
         self.game_state = game_state
         self.previous_move = previous_move
+
+
+if __name__ == '__main__':
+    board = Board()
+    for _ in range(20):
+        board.move_piece(board.find_best_move())
+        board.flip_board()
